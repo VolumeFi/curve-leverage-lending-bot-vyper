@@ -7,26 +7,16 @@
 @author Volume.finance
 """
 
-struct FeeData:
-    refund_wallet: address
-    gas_fee: uint256
-    service_fee_collector: address
-    service_fee: uint256
-
-
 interface Controller:
     def create_loan_extended(collateral: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5]): payable
     def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]): nonpayable
     def user_state(user: address) -> uint256[4]: view
-
-interface Factory:
-    def fee_data() -> FeeData: view
+    def health(user: address, full: bool) -> int256: view
 
 interface ERC20:
     def balanceOf(_owner: address) -> uint256: view
     def approve(_spender: address, _value: uint256) -> bool: nonpayable
     def transfer(_to: address, _value: uint256) -> bool: nonpayable
-    def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 FACTORY: immutable(address)
 CONTROLLER: immutable(address)
@@ -53,7 +43,7 @@ def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, 
         Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
 
 @external
-def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]):
+def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> uint256:
     assert msg.sender == FACTORY, "not factory"
     if COLLATERAL == WETH:
         old_balance: uint256 = self.balance
@@ -61,17 +51,24 @@ def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]):
         bal: uint256 = self.balance
         assert bal > old_balance, "full repay failed"
         send(OWNER, bal)
+        return bal
     else:
         old_balance: uint256 = ERC20(COLLATERAL).balanceOf(self)
         Controller(CONTROLLER).repay_extended(callbacker, callback_args)
         bal: uint256 = ERC20(COLLATERAL).balanceOf(self)
         assert bal > old_balance, "full repay failed"
         assert ERC20(COLLATERAL).transfer(OWNER, bal, default_return_value=True)
+        return bal
 
 @external
 @view
 def state() -> uint256[4]:
     return Controller(CONTROLLER).user_state(self)
+
+@external
+@view
+def health() -> int256:
+    return Controller(CONTROLLER).health(self, True)
 
 @external
 @payable

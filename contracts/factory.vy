@@ -7,11 +7,20 @@
 @author Volume.finance
 """
 
+struct SwapInfo:
+    route: address[11]
+    swap_params: uint256[5][5]
+    amount: uint256
+    pools: address[5]
+    expected: uint256
+
 interface ControllerFactory:
     def get_controller(collateral: address) -> address: view
     def WETH() -> address: view
 
 interface ERC20:
+    def approve(_spender: address, _value: uint256) -> bool: nonpayable
+    def transfer(_to: address, _value: uint256) -> bool: nonpayable
     def transferFrom(_from: address, _to: address, _value: uint256) -> bool: nonpayable
 
 interface WrappedEth:
@@ -19,11 +28,23 @@ interface WrappedEth:
 
 interface Bot:
     def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5]): nonpayable
-    def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]): nonpayable
+    def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> uint256: nonpayable
     def state() -> uint256[4]: view
+    def health() -> int256: view
+
+interface CurveSwapRouter:
+    def exchange_multiple(
+        _route: address[11],
+        _swap_params: uint256[5][5],
+        _amount: uint256,
+        _expected: uint256,
+        _pools: address[5]=[ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS],
+        _receiver: address=msg.sender
+    ) -> uint256: payable
 
 event BotStarted:
     owner: address
+    bot: address
     collateral: address
     collateral_amount: uint256
     debt: uint256
@@ -31,6 +52,11 @@ event BotStarted:
     expire: uint256
     callbacker: address
     callback_args: DynArray[uint256, 5]
+
+event BotRepayed:
+    owner: address
+    bot: address
+    return_amount: uint256
 
 event UpdateBlueprint:
     old_blueprint: address
@@ -61,8 +87,10 @@ event UpdateServiceFee:
 
 MAX_SIZE: constant(uint256) = 8
 DENOMINATOR: constant(uint256) = 10000
+VETH: constant(address) = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 WETH: immutable(address)
 CONTROLLER_FACTORY: immutable(address)
+ROUTER: immutable(address)
 blueprint: public(address)
 compass: public(address)
 bot_to_owner: public(HashMap[address, address])
@@ -73,7 +101,7 @@ service_fee: public(uint256)
 paloma: public(bytes32)
 
 @external
-def __init__(_blueprint: address, _compass: address, controller_factory: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
+def __init__(_blueprint: address, _compass: address, controller_factory: address, router: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.blueprint = _blueprint
     self.compass = _compass
     self.refund_wallet = _refund_wallet
@@ -81,6 +109,7 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
     self.service_fee_collector = _service_fee_collector
     self.service_fee = _service_fee
     CONTROLLER_FACTORY = controller_factory
+    ROUTER = router
     WETH = ControllerFactory(controller_factory).WETH()
     log UpdateCompass(empty(address), _compass)
     log UpdateBlueprint(empty(address), _blueprint)
@@ -92,52 +121,86 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
 @external
 @payable
 @nonreentrant('lock')
-def create_bot(collateral: address, collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], expire: uint256):
+def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], expire: uint256):
     _gas_fee: uint256 = self.gas_fee
     _service_fee: uint256 = self.service_fee
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
+    collateral_amount: uint256 = 0
+    _value: uint256 = msg.value
+    for swap_info in swap_infos:
+        last_index: uint256 = 0
+        for i in range(6): # to the first
+            last_index = unsafe_sub(10, unsafe_add(i, i))
+            if swap_info.route[last_index] != empty(address):
+                break
+        assert swap_info.route[last_index] == collateral or (swap_info.route[last_index] == VETH and collateral == WETH), "Wrong path"
+        amount: uint256 = swap_info.amount
+        assert amount > 0, "Insuf deposit"
+        if collateral == WETH:
+            if swap_info.route[0] == VETH:
+                assert _value >= amount, "Insuf deposit"
+                _value = unsafe_sub(_value, amount)
+            else:
+                assert ERC20(swap_info.route[0]).transferFrom(msg.sender, self, amount, default_return_value=True), "TF fail"
+                if swap_info.route[0] == WETH:
+                    WrappedEth(WETH).withdraw(amount)
+                else:
+                    assert ERC20(swap_info.route[0]).approve(ROUTER, amount, default_return_value=True), "Ap fail"
+                    amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+        else:
+            if swap_info.route[0] == VETH:
+                assert _value >= amount, "Insuf deposit"
+                _value = unsafe_sub(_value, amount)
+                amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
+            else:
+                assert ERC20(swap_info.route[0]).transferFrom(msg.sender, self, amount, default_return_value=True), "TF fail"
+                if swap_info.route[0] != collateral:
+                    assert ERC20(swap_info.route[0]).approve(ROUTER, amount, default_return_value=True), "Ap fail"
+                    amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+        collateral_amount += amount
+    if _value > _gas_fee:
+        send(msg.sender, unsafe_sub(_value, _gas_fee))
+    else:
+        assert _value == _gas_fee, "Insuf deposit"
+    send(self.refund_wallet, _gas_fee)
     bot: address = empty(address)
-    _amount: uint256 = collateral_amount
     _service_fee_amount: uint256 = 0
     if _service_fee > 0:
-        _service_fee_amount = unsafe_div(_amount * _service_fee, DENOMINATOR)
-        _amount = unsafe_sub(_amount, _service_fee_amount)
+        _service_fee_amount = unsafe_div(collateral_amount * _service_fee, DENOMINATOR)
+        collateral_amount = unsafe_sub(collateral_amount, _service_fee_amount)
+    assert collateral_amount > 0, "Insuf deposit"
     if collateral == WETH:
-        expected_value: uint256 = collateral_amount + _gas_fee
-        if msg.value > expected_value:
-            send(msg.sender, unsafe_sub(msg.value, expected_value))
-        elif msg.value < expected_value:
-            if msg.value != _gas_fee:
-                assert msg.value > _gas_fee, "insuf value"
-                send(msg.sender, unsafe_sub(msg.value, _gas_fee))
-            ERC20(WETH).transferFrom(msg.sender, self, collateral_amount)
-            WrappedEth(WETH).withdraw(collateral_amount)
         send(self.service_fee_collector, _service_fee_amount)
-        bot = create_from_blueprint(self.blueprint, controller, WETH, msg.sender, collateral, value=_amount, code_offset=3)
+        bot = create_from_blueprint(self.blueprint, controller, WETH, msg.sender, collateral, value=collateral_amount, code_offset=3)
     else:
-        if msg.value != _gas_fee:
-            assert msg.value > _gas_fee, "insuf value"
-            send(msg.sender, unsafe_sub(msg.value, _gas_fee))
         bot = create_from_blueprint(self.blueprint, controller, WETH, msg.sender, collateral, code_offset=3)
-        assert ERC20(collateral).transferFrom(msg.sender, bot, _amount, default_return_value=True)
+        assert ERC20(collateral).transfer(bot, collateral_amount, default_return_value=True), "Tr fail"
         if _service_fee_amount > 0:
-            assert ERC20(collateral).transferFrom(msg.sender, self.service_fee_collector, _service_fee_amount, default_return_value=True)
-    send(self.refund_wallet, _gas_fee)
+            assert ERC20(collateral).transfer(self.service_fee_collector, _service_fee_amount, default_return_value=True), "Tr fail"
     Bot(bot).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
     self.bot_to_owner[bot] = msg.sender
-    log BotStarted(msg.sender, collateral, collateral_amount, debt, N, expire, callbacker, callback_args)
+    log BotStarted(msg.sender, bot, collateral, collateral_amount, debt, N, expire, callbacker, callback_args)
 
 @external
 @nonreentrant('lock')
-def repay_bot(bot: address, callbacker: address, callback_args: DynArray[uint256,5]):
-    _len: uint256 = unsafe_add(unsafe_mul(unsafe_add(len(callback_args), 5), 32), 4)
-    assert msg.sender == self.compass and len(msg.data) == _len and convert(slice(msg.data, unsafe_sub(_len, 32), 32), bytes32) == self.paloma, "Unauthorized"
-    Bot(bot).repay_extended(callbacker, callback_args)
+def repay_bot(bots: DynArray[address, MAX_SIZE], callbackers: DynArray[address, MAX_SIZE], callback_args: DynArray[DynArray[uint256,5], MAX_SIZE]):
+    assert msg.sender == self.compass and convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Unauthorized"
+    assert len(bots) == len(callbackers) and len(bots) == len(callback_args), "invalidate"
+    for i in range(MAX_SIZE):
+        if i >= len(bots):
+            break
+        bal: uint256 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
+        log BotRepayed(self.bot_to_owner[bots[i]], bots[i], bal)
 
 @external
 @view
 def state(bot: address) -> uint256[4]:
     return Bot(bot).state()
+
+@external
+@view
+def health(bot: address) -> int256:
+    return Bot(bot).health()
 
 @external
 def update_compass(new_compass: address):
