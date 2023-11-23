@@ -1,127 +1,158 @@
 # Curve Leverage Lending Bot
 
-## factory.vy
+This project implements a smart contract system for a Curve Leverage Lending Bot, designed to interact with Curve Finance's liquidity pools. It includes various functionalities such as creating and repaying loans, querying the state and health of loans, and managing operational settings. The contracts are written in Vyper.
 
-### create_bot
+## Factory Contract (`factory.vy`)
 
-This function deploys a bot contract using blueprint and create a loan.
+### Functions
 
-| Key           | Type       | Description                                                       |
-| ------------- | ---------- | ----------------------------------------------------------------- |
-| swap_infos    | SwapInfo[] | swap info array to swap tokens on Curve                           |
-| collateral    | address    | collateral token address                                          |
-| debt          | uint256    | crvUSD amount to lend more from the Curve pool                    |
-| N             | uint256    | number of bands the deposit is made into of Curve pool            |
-| callbacker    | address    | address of the callback contract                                  |
-| callback_args | uint256[]  | extra arguments for the callback (up to 5) such as min_amount etc |
-| expire        | uint256    | expire timestamp of the bot                                       |
+#### `create_bot`
+Creates a new bot with specified parameters.
 
-### repay_bot
+- **Parameters:**
+  - `swap_infos` (DynArray[SwapInfo, MAX_SIZE]): Array of SwapInfo to define the swap strategy.
+  - `collateral` (address): Address of the collateral token.
+  - `debt` (uint256): Amount of crvUSD to be borrowed.
+  - `N` (uint256): Number of bands for the Curve pool deposit.
+  - `callbacker` (address): Address of the callback contract.
+  - `callback_args` (DynArray[uint256,5]): Additional arguments for the callback.
+  - `expire` (uint256): Expiration timestamp of the bot.
 
-This function adds collateral to prevent liquidation. This function is called by Compass-EVM only.
+#### `repay_bot`
+Repays the bot to prevent liquidation.
 
-| Key           | Type        | Description                                                             |
-| ------------- | ----------- | ----------------------------------------------------------------------- |
-| bots          | address[]   | bots address array                                                      |
-| callbackers   | address[]   | callback contract address array                                         |
-| callback_args | uint256[][] | extra arguments array for the callback (up to 5) such as min_amount etc |
+- **Parameters:**
+  - `bots` (DynArray[address, MAX_SIZE]): Array of bot addresses.
+  - `callbackers` (DynArray[address, MAX_SIZE]): Array of callback contract addresses.
+  - `callback_args` (DynArray[DynArray[uint256,5], MAX_SIZE]): Array of additional arguments for the callback.
 
-### health
+#### `state`
+Returns the state of a specified bot.
 
-This function returns health value. This is a view function.
+- **Parameters:**
+  - `bot` (address): Address of the bot.
+- **Returns:** `uint256[4]`: Array containing collateral, stablecoin, debt, and N.
 
-| Key        | Type    | Description                  |
-| ---------- | ------- | ---------------------------- |
-| collateral | address | collateral token address     |
-| bot        | address | bot address                  |
-| **Return** | int256  | Returns health of collateral |
+#### `health`
+Returns the health value of a specified bot's collateral.
 
-### state
+- **Parameters:**
+  - `bot` (address): Address of the bot.
+- **Returns:** `int256`: Health of the collateral.
 
-This function returns loan state. This is a view function.
+#### `update_compass`
+Updates the Compass-EVM address.
 
-| Key        | Type       | Description                       |
-| ---------- | ---------- | --------------------------------- |
-| collateral | address    | collateral token address          |
-| bot        | address    | bot address                       |
-| **Return** | uint256[4] | [collateral, stablecoin, debt, N] |
+- **Parameters:**
+  - `new_compass` (address): New Compass-EVM address.
 
-### update_compass
+#### `update_refund_wallet`
+Updates the gas refund wallet address.
 
-Update Compass-EVM address.  This is run by Compass-EVM only.
+- **Parameters:**
+  - `new_refund_wallet` (address): New refund wallet address.
 
-| Key         | Type    | Description             |
-| ----------- | ------- | ----------------------- |
-| new_compass | address | New compass-evm address |
+#### `update_gas_fee`
+Updates the gas fee amount.
 
-### update_refund_wallet
+- **Parameters:**
+  - `new_gas_fee` (uint256): New fee amount.
 
-Update gas refund wallet address.  This is run by Compass-EVM only.
+#### `set_paloma`
+Sets the Paloma CW address.
 
-| Key               | Type    | Description               |
-| ----------------- | ------- | ------------------------- |
-| new_refund_wallet | address | New refund wallet address |
+#### `update_service_fee_collector`
+Updates the service fee collector address.
 
-### update_fee
+- **Parameters:**
+  - `new_service_fee_collector` (address): New service fee collector address.
 
-Update gas fee amount to pay.  This is run by Compass-EVM only.
+## Curve Lending Bot (`curve_lending_bot.vy`)
 
-| Key     | Type    | Description    |
-| ------- | ------- | -------------- |
-| new_fee | uint256 | New fee amount |
+### Functions
 
-### set_paloma
+#### `create_loan_extended`
+Creates a loan.
 
-Set Paloma CW address in bytes32.  This is run by Compass-EVM only and after setting paloma, the bot can start working.
+- **Parameters:**
+  - `collateral_amount` (uint256): Amount of collateral token.
+  - `debt` (uint256): Amount of crvUSD to be borrowed.
+  - `N` (uint256): Number of bands for the Curve pool deposit.
+  - `callbacker` (address): Address of the callback contract.
+  - `callback_args` (DynArray[uint256,5]): Additional arguments for the callback.
 
-| Key | Type | Description |
-| --- | ---- | ----------- |
-| -   | -    | -           |
+#### `repay_extended`
+Repays a loan.
 
-### update_service_fee_collector
+- **Parameters:**
+  - `callbacker` (address): Address of the callback contract.
+  - `callback_args` (DynArray[uint256,5]): Additional arguments for the callback.
 
-Update service fee collector address.  This is run by the original fee collector address. The address receives service fee from swapping.
-
-| Key                       | Type    | Description                       |
-| ------------------------- | ------- | --------------------------------- |
-| new_service_fee_collector | address | New service fee collector address |
+The other functions (`state`, `health`) remain the same as in the factory contract.
 
 
-## curve_lending_bot.vy
+## Events
 
-### create_loan_extended
+### `BotStarted`
+Emitted when a new bot is created.
+- **Properties:**
+  - `owner` (address): The address of the bot owner.
+  - `bot` (address): The address of the created bot.
+  - `collateral` (address): The address of the collateral token.
+  - `collateral_amount` (uint256): The amount of collateral token.
+  - `debt` (uint256): The amount of crvUSD borrowed.
+  - `N` (uint256): The number of bands for the Curve pool deposit.
+  - `expire` (uint256): The expiration timestamp of the bot.
+  - `callbacker` (address): The address of the callback contract.
+  - `callback_args` (DynArray[uint256, 5]): The additional arguments for the callback.
 
-This function creates a loan. Only run by a factory contract.
+### `BotRepayed`
+Emitted when a bot is repaid.
+- **Properties:**
+  - `owner` (address): The address of the bot owner.
+  - `bot` (address): The address of the repaid bot.
+  - `return_amount` (uint256): The amount returned in the repayment.
 
-| Key           | Type       | Description                                                       |
-| ------------- | ---------- | ----------------------------------------------------------------- |
-| collateral_amount    | address    | collateral token address                                          |
-| debt          | uint256    | crvUSD amount to lend more from the Curve pool                    |
-| N             | uint256    | number of bands the deposit is made into of Curve pool            |
-| callbacker    | address    | address of the callback contract                                  |
-| callback_args | uint256[]  | extra arguments for the callback (up to 5) such as min_amount etc |
+### `UpdateBlueprint`
+Emitted when the blueprint is updated.
+- **Properties:**
+  - `old_blueprint` (address): The address of the old blueprint.
+  - `new_blueprint` (address): The address of the new blueprint.
 
-### repay_extended
+### `UpdateCompass`
+Emitted when the Compass-EVM address is updated.
+- **Properties:**
+  - `old_compass` (address): The old Compass-EVM address.
+  - `new_compass` (address): The new Compass-EVM address.
 
-This function creates a loan. Only run by a factory contract.
+### `UpdateRefundWallet`
+Emitted when the refund wallet is updated.
+- **Properties:**
+  - `old_refund_wallet` (address): The old refund wallet address.
+  - `new_refund_wallet` (address): The new refund wallet address.
 
-| Key           | Type       | Description                                                       |
-| ------------- | ---------- | ----------------------------------------------------------------- |
-| callbacker    | address    | address of the callback contract                                  |
-| callback_args | uint256[]  | extra arguments for the callback (up to 5) such as min_amount etc |
+### `SetPaloma`
+Emitted when the Paloma CW address is set.
+- **Properties:**
+  - `paloma` (bytes32): The Paloma CW address.
 
-### state
+### `UpdateGasFee`
+Emitted when the gas fee is updated.
+- **Properties:**
+  - `old_gas_fee` (uint256): The old gas fee amount.
+  - `new_gas_fee` (uint256): The new gas fee amount.
 
-This function returns loan state. This is a view function.
+### `UpdateServiceFeeCollector`
+Emitted when the service fee collector address is updated.
+- **Properties:**
+  - `old_service_fee_collector` (address): The old service fee collector address.
+  - `new_service_fee_collector` (address): The new service fee collector address.
 
-| Key        | Type       | Description                       |
-| ---------- | ---------- | --------------------------------- |
-| **Return** | uint256[4] | [collateral, stablecoin, debt, N] |
+### `UpdateServiceFee`
+Emitted when the service fee is updated.
+- **Properties:**
+  - `old_service_fee` (uint256): The old service fee amount.
+  - `new_service_fee` (uint256): The new service fee amount.
 
-### health
+These events provide detailed insights into the various actions and changes within the system, ensuring transparency and accountability.
 
-This function returns health value. This is a view function.
-
-| Key        | Type    | Description                  |
-| ---------- | ------- | ---------------------------- |
-| **Return** | int256  | Returns health of collateral |
