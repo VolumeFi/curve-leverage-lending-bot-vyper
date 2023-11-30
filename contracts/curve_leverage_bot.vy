@@ -44,7 +44,7 @@ def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, 
 
 @external
 def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> uint256:
-    assert msg.sender == FACTORY, "not factory"
+    assert msg.sender == FACTORY or msg.sender == OWNER, "Unauthorized"
     if COLLATERAL == WETH:
         old_balance: uint256 = self.balance
         Controller(CONTROLLER).repay_extended(callbacker, callback_args)

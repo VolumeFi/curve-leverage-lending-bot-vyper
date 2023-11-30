@@ -11,8 +11,8 @@ struct SwapInfo:
     route: address[11]
     swap_params: uint256[5][5]
     amount: uint256
-    pools: address[5]
     expected: uint256
+    pools: address[5]
 
 interface ControllerFactory:
     def get_controller(collateral: address) -> address: view
@@ -33,12 +33,12 @@ interface Bot:
     def health() -> int256: view
 
 interface CurveSwapRouter:
-    def exchange_multiple(
+    def exchange(
         _route: address[11],
         _swap_params: uint256[5][5],
         _amount: uint256,
         _expected: uint256,
-        _pools: address[5]=[ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS, ZERO_ADDRESS],
+        _pools: address[5]=empty(address[5]),
         _receiver: address=msg.sender
     ) -> uint256: payable
 
@@ -49,6 +49,7 @@ event BotStarted:
     collateral_amount: uint256
     debt: uint256
     N: uint256
+    health_threshold: uint256
     expire: uint256
     callbacker: address
     callback_args: DynArray[uint256, 5]
@@ -86,7 +87,7 @@ event UpdateServiceFee:
     new_service_fee: uint256
 
 MAX_SIZE: constant(uint256) = 8
-DENOMINATOR: constant(uint256) = 10000
+DENOMINATOR: constant(uint256) = 10**18
 VETH: constant(address) = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 WETH: immutable(address)
 CONTROLLER_FACTORY: immutable(address)
@@ -121,7 +122,7 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
 @external
 @payable
 @nonreentrant('lock')
-def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], expire: uint256):
+def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], health_threshold: uint256, expire: uint256):
     _gas_fee: uint256 = self.gas_fee
     _service_fee: uint256 = self.service_fee
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
@@ -146,17 +147,17 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
                     WrappedEth(WETH).withdraw(amount)
                 else:
                     assert ERC20(swap_info.route[0]).approve(ROUTER, amount, default_return_value=True), "Ap fail"
-                    amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+                    amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         else:
             if swap_info.route[0] == VETH:
                 assert _value >= amount, "Insuf deposit"
                 _value = unsafe_sub(_value, amount)
-                amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
+                amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
             else:
                 assert ERC20(swap_info.route[0]).transferFrom(msg.sender, self, amount, default_return_value=True), "TF fail"
                 if swap_info.route[0] != collateral:
                     assert ERC20(swap_info.route[0]).approve(ROUTER, amount, default_return_value=True), "Ap fail"
-                    amount = CurveSwapRouter(ROUTER).exchange_multiple(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+                    amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         collateral_amount += amount
     if _value > _gas_fee:
         send(msg.sender, unsafe_sub(_value, _gas_fee))
@@ -179,7 +180,7 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
             assert ERC20(collateral).transfer(self.service_fee_collector, _service_fee_amount, default_return_value=True), "Tr fail"
     Bot(bot).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
     self.bot_to_owner[bot] = msg.sender
-    log BotStarted(msg.sender, bot, collateral, collateral_amount, debt, N, expire, callbacker, callback_args)
+    log BotStarted(msg.sender, bot, collateral, collateral_amount, debt, N, health_threshold, expire, callbacker, callback_args)
 
 @external
 @nonreentrant('lock')

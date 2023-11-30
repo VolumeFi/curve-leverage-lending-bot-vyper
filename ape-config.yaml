@@ -1,1 +1,7 @@
 name: curve-leverage-bot-vyper
+
+hardhat:
+  fork:
+    ethereum:
+      mainnet:
+        upstream_provider: infura
