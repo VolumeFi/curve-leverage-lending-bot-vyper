@@ -44,7 +44,7 @@ def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, 
     if COLLATERAL == WETH:
         Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args, value=collateral_amount)
     else:
-        assert ERC20(COLLATERAL).approve(CONTROLLER, collateral_amount, default_return_value=True)
+        assert ERC20(COLLATERAL).approve(CONTROLLER, collateral_amount, default_return_value=True), "Ap fail"
         Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
 
 @external
