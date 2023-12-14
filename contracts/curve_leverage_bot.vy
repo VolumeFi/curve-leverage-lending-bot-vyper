@@ -13,6 +13,9 @@ interface Controller:
     def user_state(user: address) -> uint256[4]: view
     def health(user: address, full: bool) -> int256: view
 
+interface WrappedEth:
+    def withdraw(amount: uint256): nonpayable
+
 interface ERC20:
     def balanceOf(_owner: address) -> uint256: view
     def approve(_spender: address, _value: uint256) -> bool: nonpayable
@@ -23,15 +26,17 @@ CONTROLLER: immutable(address)
 COLLATERAL: immutable(address)
 WETH: immutable(address)
 OWNER: immutable(address)
+STABLECOIN: immutable(address)
 
 @external
 @payable
-def __init__(controller: address, weth: address, owner: address, collateral: address):
+def __init__(controller: address, weth: address, owner: address, collateral: address, stablecoin: address):
     FACTORY = msg.sender
     CONTROLLER = controller
     COLLATERAL = collateral
     WETH = weth
     OWNER = owner
+    STABLECOIN = stablecoin
 
 @external
 def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5]):
@@ -44,21 +49,13 @@ def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, 
 
 @external
 def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> uint256:
-    assert msg.sender == FACTORY or msg.sender == OWNER, "Unauthorized"
-    if COLLATERAL == WETH:
-        old_balance: uint256 = self.balance
-        Controller(CONTROLLER).repay_extended(callbacker, callback_args)
-        bal: uint256 = self.balance
-        assert bal > old_balance, "full repay failed"
-        send(OWNER, bal)
-        return bal
-    else:
-        old_balance: uint256 = ERC20(COLLATERAL).balanceOf(self)
-        Controller(CONTROLLER).repay_extended(callbacker, callback_args)
-        bal: uint256 = ERC20(COLLATERAL).balanceOf(self)
-        assert bal > old_balance, "full repay failed"
-        assert ERC20(COLLATERAL).transfer(OWNER, bal, default_return_value=True)
-        return bal
+    assert msg.sender == FACTORY, "Unauthorized"
+    bal: uint256 = ERC20(STABLECOIN).balanceOf(self)
+    Controller(CONTROLLER).repay_extended(callbacker, callback_args)
+    bal = unsafe_sub(ERC20(STABLECOIN).balanceOf(self), bal)
+    assert bal > 0, "repay fail"
+    assert ERC20(STABLECOIN).transfer(OWNER, bal, default_return_value=True), "Tr fail"
+    return bal
 
 @external
 @view

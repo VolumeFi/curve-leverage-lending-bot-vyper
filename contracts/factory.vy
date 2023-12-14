@@ -16,6 +16,7 @@ struct SwapInfo:
 
 interface ControllerFactory:
     def get_controller(collateral: address) -> address: view
+    def stablecoin() -> address: view
     def WETH() -> address: view
 
 interface ERC20:
@@ -49,6 +50,7 @@ event BotStarted:
     collateral_amount: uint256
     debt: uint256
     N: uint256
+    leverage: uint256
     health_threshold: uint256
     expire: uint256
     callbacker: address
@@ -92,6 +94,7 @@ VETH: constant(address) = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE
 WETH: immutable(address)
 CONTROLLER_FACTORY: immutable(address)
 ROUTER: immutable(address)
+STABLECOIN: immutable(address)
 blueprint: public(address)
 compass: public(address)
 bot_to_owner: public(HashMap[address, address])
@@ -112,6 +115,7 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
     CONTROLLER_FACTORY = controller_factory
     ROUTER = router
     WETH = ControllerFactory(controller_factory).WETH()
+    STABLECOIN = ControllerFactory(CONTROLLER_FACTORY).stablecoin()
     log UpdateCompass(empty(address), _compass)
     log UpdateBlueprint(empty(address), _blueprint)
     log UpdateRefundWallet(empty(address), _refund_wallet)
@@ -122,7 +126,7 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
 @external
 @payable
 @nonreentrant('lock')
-def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], health_threshold: uint256, expire: uint256):
+def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], leverage: uint256, health_threshold: uint256, expire: uint256):
     _gas_fee: uint256 = self.gas_fee
     _service_fee: uint256 = self.service_fee
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
@@ -172,26 +176,35 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
     assert collateral_amount > 0, "Insuf deposit"
     if collateral == WETH:
         send(self.service_fee_collector, _service_fee_amount)
-        bot = create_from_blueprint(self.blueprint, controller, WETH, msg.sender, collateral, value=collateral_amount, code_offset=3)
+        bot = create_from_blueprint(self.blueprint, controller, WETH, msg.sender, collateral, STABLECOIN, value=collateral_amount, code_offset=3)
     else:
-        bot = create_from_blueprint(self.blueprint, controller, WETH, msg.sender, collateral, code_offset=3)
+        bot = create_from_blueprint(self.blueprint, controller, WETH, msg.sender, collateral, STABLECOIN, code_offset=3)
         assert ERC20(collateral).transfer(bot, collateral_amount, default_return_value=True), "Tr fail"
         if _service_fee_amount > 0:
             assert ERC20(collateral).transfer(self.service_fee_collector, _service_fee_amount, default_return_value=True), "Tr fail"
     Bot(bot).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
     self.bot_to_owner[bot] = msg.sender
-    log BotStarted(msg.sender, bot, collateral, collateral_amount, debt, N, health_threshold, expire, callbacker, callback_args)
+    log BotStarted(msg.sender, bot, collateral, collateral_amount, debt, N, leverage, health_threshold, expire, callbacker, callback_args)
 
 @external
 @nonreentrant('lock')
 def repay_bot(bots: DynArray[address, MAX_SIZE], callbackers: DynArray[address, MAX_SIZE], callback_args: DynArray[DynArray[uint256,5], MAX_SIZE]):
-    assert msg.sender == self.compass and convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Unauthorized"
     assert len(bots) == len(callbackers) and len(bots) == len(callback_args), "invalidate"
-    for i in range(MAX_SIZE):
-        if i >= len(bots):
-            break
-        bal: uint256 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
-        log BotRepayed(self.bot_to_owner[bots[i]], bots[i], bal)
+    if msg.sender == self.compass:
+        assert convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Unauthorized"
+        for i in range(MAX_SIZE):
+            if i >= len(bots):
+                break
+            bal: uint256 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
+            log BotRepayed(self.bot_to_owner[bots[i]], bots[i], bal)
+    else:
+        for i in range(MAX_SIZE):
+            if i >= len(bots):
+                break
+            owner: address = self.bot_to_owner[bots[i]]
+            assert owner == msg.sender, "Unauthorized"
+            bal: uint256 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
+            log BotRepayed(owner, bots[i], bal)
 
 @external
 @view
