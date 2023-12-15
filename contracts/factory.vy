@@ -51,6 +51,7 @@ event BotStarted:
     debt: uint256
     N: uint256
     leverage: uint256
+    deleverage_percentage: uint256
     health_threshold: uint256
     expire: uint256
     callbacker: address
@@ -126,7 +127,7 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
 @external
 @payable
 @nonreentrant('lock')
-def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], leverage: uint256, health_threshold: uint256, expire: uint256):
+def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], leverage: uint256, deleverage_percentage: uint256, health_threshold: uint256, expire: uint256):
     _gas_fee: uint256 = self.gas_fee
     _service_fee: uint256 = self.service_fee
     controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
@@ -184,7 +185,7 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
             assert ERC20(collateral).transfer(self.service_fee_collector, _service_fee_amount, default_return_value=True), "Tr fail"
     Bot(bot).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
     self.bot_to_owner[bot] = msg.sender
-    log BotStarted(msg.sender, bot, collateral, collateral_amount, debt, N, leverage, health_threshold, expire, callbacker, callback_args)
+    log BotStarted(msg.sender, bot, collateral, collateral_amount, debt, N, leverage, deleverage_percentage, health_threshold, expire, callbacker, callback_args)
 
 @external
 @nonreentrant('lock')
