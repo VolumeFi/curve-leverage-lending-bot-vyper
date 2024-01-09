@@ -203,7 +203,7 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
         self.bot_info[_deposit_id] = BotInfo({
             depositor: msg.sender,
             collateral: collateral,
-            amount: collateral_amount,
+            amount: unsafe_div(collateral_amount, number_trades),
             debt: debt,
             N: N,
             leverage: leverage,
