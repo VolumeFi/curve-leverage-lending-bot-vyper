@@ -61,6 +61,57 @@ def test_deposit(project, LeverageBotFactory, UniswapV3Router, WBTC, WETH, Alice
     number_trades = 2
     interval = 30
     LeverageBotFactory.create_bot(swap_infos, collateral, debt, N, callbacker, callback_args, leverage, deleverage_percentage, health_threshold, expire, number_trades, interval, sender=Alice, value=5 * 10 ** 16)
+
+
+def test_create_next_bot(project, LeverageBotFactory, UniswapV3Router, WBTC, WETH, Alice, Compass):
+    set_paloma(project, LeverageBotFactory, Compass)
+    UniswapV3Router.exactInputSingle(
+        [WETH, WBTC, 3000, Alice, 2 ** 32, 10 ** 18, 2 * 10 ** 4, 0],
+        sender=Alice,
+        value=10 ** 18)
+    WBTC.approve(LeverageBotFactory, 2 * 10 ** 4, sender=Alice)
+    swap_infos = [[
+        [
+          '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+        ],
+        [
+          [0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0],
+          [0, 0, 0, 0, 0],
+        ],
+        20000,
+        20000,
+        [
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+          '0x0000000000000000000000000000000000000000',
+        ]]]
+    collateral = '0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599'
+    debt = 30000000000000000000
+    N = 10
+    callbacker = '0xa2518b71ee64e910741f5cf480b19e8e402de4d7'
+    callback_args = [1, 10000]
+    leverage = 624
+    deleverage_percentage = 100
+    health_threshold = 206
+    expire = 33241352537
+    number_trades = 2
+    interval = 30
+    LeverageBotFactory.create_bot(swap_infos, collateral, debt, N, callbacker, callback_args, leverage, deleverage_percentage, health_threshold, expire, number_trades, interval, sender=Alice, value=5 * 10 ** 16)
     deposit_id = 0
     callbacker = '0xa2518b71ee64e910741f5cf480b19e8e402de4d7'
     callback_args = [1, 10000]
@@ -70,3 +121,43 @@ def test_deposit(project, LeverageBotFactory, UniswapV3Router, WBTC, WETH, Alice
     Compass.call(tx)
 
 
+def test_update_compass(project, LeverageBotFactory, Bob, Compass):
+    set_paloma(project, LeverageBotFactory, Compass)
+    data = LeverageBotFactory.update_compass.encode_input(Bob) + bstring2bytes32(b"paloma")
+    tx = project.provider.network.ecosystem.create_transaction(chain_id=project.provider.chain_id, to=LeverageBotFactory.address, data=data)
+    Compass.call(tx)
+
+
+def test_update_blueprint(project, LeverageBotFactory, Bob, Compass):
+    set_paloma(project, LeverageBotFactory, Compass)
+    data = LeverageBotFactory.update_blueprint.encode_input(Bob) + bstring2bytes32(b"paloma")
+    tx = project.provider.network.ecosystem.create_transaction(chain_id=project.provider.chain_id, to=LeverageBotFactory.address, data=data)
+    Compass.call(tx)
+
+
+def test_update_refund_wallet(project, LeverageBotFactory, Bob, Compass):
+    set_paloma(project, LeverageBotFactory, Compass)
+    data = LeverageBotFactory.update_refund_wallet.encode_input(Bob) + bstring2bytes32(b"paloma")
+    tx = project.provider.network.ecosystem.create_transaction(chain_id=project.provider.chain_id, to=LeverageBotFactory.address, data=data)
+    Compass.call(tx)
+
+
+def test_update_gas_fee(project, LeverageBotFactory, Compass):
+    set_paloma(project, LeverageBotFactory, Compass)
+    data = LeverageBotFactory.update_gas_fee.encode_input(10 ** 16) + bstring2bytes32(b"paloma")
+    tx = project.provider.network.ecosystem.create_transaction(chain_id=project.provider.chain_id, to=LeverageBotFactory.address, data=data)
+    Compass.call(tx)
+
+
+def test_update_service_fee_collector(project, LeverageBotFactory, Bob, Compass):
+    set_paloma(project, LeverageBotFactory, Compass)
+    data = LeverageBotFactory.update_service_fee_collector.encode_input(Bob) + bstring2bytes32(b"paloma")
+    tx = project.provider.network.ecosystem.create_transaction(chain_id=project.provider.chain_id, to=LeverageBotFactory.address, data=data)
+    Compass.call(tx)
+
+
+def update_service_fee(project, LeverageBotFactory, Compass):
+    set_paloma(project, LeverageBotFactory, Compass)
+    data = LeverageBotFactory.update_service_fee.encode_input(10 ** 16) + bstring2bytes32(b"paloma")
+    tx = project.provider.network.ecosystem.create_transaction(chain_id=project.provider.chain_id, to=LeverageBotFactory.address, data=data)
+    Compass.call(tx)
