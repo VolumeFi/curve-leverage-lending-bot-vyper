@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 
 import pytest
+from web3 import Web3
+from eth_abi import encode
 from typing import Union
 
 
@@ -51,6 +53,11 @@ def USDC(project):
 
 
 @pytest.fixture(scope="session")
+def WBTC(project):
+    return project.wbtc.at("0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599")
+
+
+@pytest.fixture(scope="session")
 def UniswapV3Router(project):
     return project.uniswap_v3_router.at(
         "0xE592427A0AEce92De3Edee1F18E0157C05861564")
@@ -73,12 +80,13 @@ def LeverageBotFactory(
         BotBlueprint, Compass, CurveRouter, RefundWallet,
         ServiceFeeCollector, Deployer, project):
     controller_factory = "0xC9332fdCB1C491Dcc683bAe86Fe3cb70360738BC"
-    gas_fee = 15000000000000000  # 0.015ETH
+    gas_fee = 25000000000000000  # 0.015ETH
     service_fee = 2000000000000000  # 0.2%
-    return Deployer.deploy(
+    factory_contract = Deployer.deploy(
         project.factory, BotBlueprint.contract_address, Compass,
         controller_factory, CurveRouter, RefundWallet, gas_fee,
         ServiceFeeCollector, service_fee)
+    return factory_contract
 
 
 def get_blueprint_initcode(initcode: Union[str, bytes]):
@@ -90,3 +98,17 @@ def get_blueprint_initcode(initcode: Union[str, bytes]):
         b"\x3d\x81\x60\x0a\x3d\x39\xf3" + initcode
     )
     return initcode
+
+
+def set_paloma(project, factory_contract, Compass):
+    data = function_signature("set_paloma()") + bstring2bytes32(b"paloma")
+    tx = project.provider.network.ecosystem.create_transaction(chain_id=project.provider.chain_id, to=factory_contract.address, data=data)
+    Compass.call(tx)
+
+
+def bstring2bytes32(str):
+    return encode(["bytes32"], [str])
+
+
+def function_signature(str):
+    return Web3.keccak(text=str)[:4]
