@@ -12,6 +12,6 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "hardhat": "^2.19.1"
+    "hardhat": "^2.22.2"
   }
 }
