@@ -257,7 +257,7 @@ def create_next_bot(deposit_id: uint256, callbacker: address, callback_args: Dyn
     assert msg.sender == self.compass and convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Unauthorized"
     _bot_info: BotInfo = self.bot_info[deposit_id]
     assert _bot_info.remaining_count == remaining_count and remaining_count > 0, "Wrong count"
-    self.remaining_funds[msg.sender][_bot_info.collateral] -= _bot_info.amount
+    self.remaining_funds[_bot_info.depositor][_bot_info.collateral] -= _bot_info.amount
     self._create_bot(deposit_id, _bot_info.depositor, _bot_info.collateral, _bot_info.amount, _bot_info.debt, _bot_info.N, callbacker, callback_args, _bot_info.leverage, _bot_info.deleverage_percentage, _bot_info.health_threshold, _bot_info.expire, remaining_count, _bot_info.interval)
     self.bot_info[deposit_id].remaining_count = unsafe_sub(remaining_count, 1)
 
