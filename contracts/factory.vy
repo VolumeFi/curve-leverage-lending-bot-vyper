@@ -158,7 +158,7 @@ def _safe_transfer(_token: address, _to: address, _amount: uint256):
 
 @internal
 def _safe_transfer_from(_token: address, _from: address, _to: address, _amount: uint256):
-    assert ERC20(_token).transferFrom(_token, _to, _amount, default_return_value=True), "Failed transferFrom"
+    assert ERC20(_token).transferFrom(_from, _to, _amount, default_return_value=True), "Failed transferFrom"
 
 @external
 @payable
