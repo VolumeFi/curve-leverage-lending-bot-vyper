@@ -42,7 +42,7 @@ interface WrappedEth:
 
 interface Bot:
     def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5]): nonpayable
-    def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> uint256: nonpayable
+    def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> (uint256, uint256): nonpayable
     def state() -> uint256[4]: view
     def health() -> int256: view
 
@@ -81,7 +81,8 @@ event CancelPendingBot:
 event BotRepayed:
     owner: address
     bot: address
-    return_amount: uint256
+    stablecoin_amount: uint256
+    collateral_amount: uint256
 
 event UpdateBlueprint:
     old_blueprint: address
@@ -270,16 +271,20 @@ def repay_bot(bots: DynArray[address, MAX_SIZE], callbackers: DynArray[address, 
         for i in range(MAX_SIZE):
             if i >= len(bots):
                 break
-            bal: uint256 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
-            log BotRepayed(self.bot_to_owner[bots[i]], bots[i], bal)
+            bal0: uint256 = 0
+            bal1: uint256 = 0
+            bal0, bal1 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
+            log BotRepayed(self.bot_to_owner[bots[i]], bots[i], bal0, bal1)
     else:
         for i in range(MAX_SIZE):
             if i >= len(bots):
                 break
             owner: address = self.bot_to_owner[bots[i]]
             assert owner == msg.sender, "Unauthorized"
-            bal: uint256 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
-            log BotRepayed(owner, bots[i], bal)
+            bal0: uint256 = 0
+            bal1: uint256 = 0
+            bal0, bal1 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
+            log BotRepayed(owner, bots[i], bal0, bal1)
 
 @external
 @nonreentrant('lock')
