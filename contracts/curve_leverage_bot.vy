@@ -44,18 +44,30 @@ def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, 
     if COLLATERAL == WETH:
         Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args, value=collateral_amount)
     else:
-        assert ERC20(COLLATERAL).approve(CONTROLLER, collateral_amount, default_return_value=True), "Ap fail"
+        assert ERC20(COLLATERAL).approve(CONTROLLER, collateral_amount, default_return_value=True), "Failed approve"
         Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
 
+@internal
+def _safe_transfer(_token: address, _to: address, _amount: uint256):
+    assert ERC20(_token).transfer(_to, _amount, default_return_value=True), "Failed transfer"
+
 @external
-def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> uint256:
+def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> (uint256, uint256):
     assert msg.sender == FACTORY, "Unauthorized"
-    bal: uint256 = ERC20(STABLECOIN).balanceOf(self)
+    bal0: uint256 = ERC20(STABLECOIN).balanceOf(self)
+    bal1: uint256 = ERC20(COLLATERAL).balanceOf(self)
     Controller(CONTROLLER).repay_extended(callbacker, callback_args)
-    bal = unsafe_sub(ERC20(STABLECOIN).balanceOf(self), bal)
-    assert bal > 0, "repay fail"
-    assert ERC20(STABLECOIN).transfer(OWNER, bal, default_return_value=True), "Tr fail"
-    return bal
+    bal0 = unsafe_sub(ERC20(STABLECOIN).balanceOf(self), bal0)
+    bal1 = unsafe_sub(ERC20(COLLATERAL).balanceOf(self), bal1)
+    if bal0 > 0:
+        self._safe_transfer(STABLECOIN, OWNER, bal0)
+    if bal1 > 0:
+        if COLLATERAL == WETH:
+            WrappedEth(WETH).withdraw(bal1)
+            send(OWNER, bal1)
+        else:
+            self._safe_transfer(COLLATERAL, OWNER, bal1)
+    return bal0, bal1
 
 @external
 @view
