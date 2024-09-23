@@ -1,6 +1,6 @@
-#pragma version 0.3.10
+#pragma version 0.4.0
 #pragma optimize gas
-#pragma evm-version shanghai
+#pragma evm-version cancun
 """
 @title Curve Leverage Bot
 @license Apache 2.0
@@ -29,7 +29,7 @@ WETH: immutable(address)
 OWNER: immutable(address)
 STABLECOIN: immutable(address)
 
-@external
+@deploy
 @payable
 def __init__(controller: address, weth: address, owner: address, collateral: address, stablecoin: address):
     FACTORY = msg.sender
@@ -43,28 +43,28 @@ def __init__(controller: address, weth: address, owner: address, collateral: add
 def create_loan_extended(collateral_amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5]):
     assert msg.sender == FACTORY, "not factory"
     if COLLATERAL == WETH:
-        Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args, value=collateral_amount)
+        extcall Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args, value=collateral_amount)
     else:
-        assert ERC20(COLLATERAL).approve(CONTROLLER, collateral_amount, default_return_value=True), "Failed approve"
-        Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
+        assert extcall ERC20(COLLATERAL).approve(CONTROLLER, collateral_amount, default_return_value=True), "Failed approve"
+        extcall Controller(CONTROLLER).create_loan_extended(collateral_amount, debt, N, callbacker, callback_args)
 
 @internal
 def _safe_transfer(_token: address, _to: address, _amount: uint256):
-    assert ERC20(_token).transfer(_to, _amount, default_return_value=True), "Failed transfer"
+    assert extcall ERC20(_token).transfer(_to, _amount, default_return_value=True), "Failed transfer"
 
 @external
 def repay_extended(callbacker: address, callback_args: DynArray[uint256,5]) -> (uint256, uint256):
     assert msg.sender == FACTORY, "Unauthorized"
-    bal0: uint256 = ERC20(STABLECOIN).balanceOf(self)
-    bal1: uint256 = ERC20(COLLATERAL).balanceOf(self)
-    Controller(CONTROLLER).repay_extended(callbacker, callback_args)
-    bal0 = unsafe_sub(ERC20(STABLECOIN).balanceOf(self), bal0)
-    bal1 = unsafe_sub(ERC20(COLLATERAL).balanceOf(self), bal1)
+    bal0: uint256 = staticcall ERC20(STABLECOIN).balanceOf(self)
+    bal1: uint256 = staticcall ERC20(COLLATERAL).balanceOf(self)
+    extcall Controller(CONTROLLER).repay_extended(callbacker, callback_args)
+    bal0 = unsafe_sub(staticcall ERC20(STABLECOIN).balanceOf(self), bal0)
+    bal1 = unsafe_sub(staticcall ERC20(COLLATERAL).balanceOf(self), bal1)
     if bal0 > 0:
         self._safe_transfer(STABLECOIN, OWNER, bal0)
     if bal1 > 0:
         if COLLATERAL == WETH:
-            WrappedEth(WETH).withdraw(bal1)
+            extcall WrappedEth(WETH).withdraw(bal1)
             send(OWNER, bal1)
         else:
             self._safe_transfer(COLLATERAL, OWNER, bal1)
@@ -76,16 +76,16 @@ def liquidate_extended(min_x: uint256, callbacker: address, callback_args: DynAr
     use_eth: bool = False
     if COLLATERAL == WETH:
         use_eth = True
-    bal0: uint256 = ERC20(STABLECOIN).balanceOf(self)
-    bal1: uint256 = ERC20(COLLATERAL).balanceOf(self)
-    Controller(CONTROLLER).liquidate_extended(self, min_x, 10 ** 18, use_eth, callbacker, callback_args)
-    bal0 = unsafe_sub(ERC20(STABLECOIN).balanceOf(self), bal0)
-    bal1 = unsafe_sub(ERC20(COLLATERAL).balanceOf(self), bal1)
+    bal0: uint256 = staticcall ERC20(STABLECOIN).balanceOf(self)
+    bal1: uint256 = staticcall ERC20(COLLATERAL).balanceOf(self)
+    extcall Controller(CONTROLLER).liquidate_extended(self, min_x, 10 ** 18, use_eth, callbacker, callback_args)
+    bal0 = unsafe_sub(staticcall ERC20(STABLECOIN).balanceOf(self), bal0)
+    bal1 = unsafe_sub(staticcall ERC20(COLLATERAL).balanceOf(self), bal1)
     if bal0 > 0:
         self._safe_transfer(STABLECOIN, OWNER, bal0)
     if bal1 > 0:
         if COLLATERAL == WETH:
-            WrappedEth(WETH).withdraw(bal1)
+            extcall WrappedEth(WETH).withdraw(bal1)
             send(OWNER, bal1)
         else:
             self._safe_transfer(COLLATERAL, OWNER, bal1)
@@ -94,12 +94,12 @@ def liquidate_extended(min_x: uint256, callbacker: address, callback_args: DynAr
 @external
 @view
 def state() -> uint256[4]:
-    return Controller(CONTROLLER).user_state(self)
+    return staticcall Controller(CONTROLLER).user_state(self)
 
 @external
 @view
 def health() -> int256:
-    return Controller(CONTROLLER).health(self, True)
+    return staticcall Controller(CONTROLLER).health(self, True)
 
 @external
 @payable

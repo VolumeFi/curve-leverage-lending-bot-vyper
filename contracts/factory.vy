@@ -1,6 +1,6 @@
-#pragma version 0.3.10
+#pragma version 0.4.0
 #pragma optimize gas
-#pragma evm-version shanghai
+#pragma evm-version cancun
 """
 @title Curve Leverage Bot Factory
 @license Apache 2.0
@@ -137,7 +137,7 @@ bot_info: public(HashMap[uint256, BotInfo])
 last_deposit_id: public(uint256)
 remaining_funds: public(HashMap[address, HashMap[address, uint256]])
 
-@external
+@deploy
 def __init__(_blueprint: address, _compass: address, controller_factory: address, router: address, _refund_wallet: address, _gas_fee: uint256, _service_fee_collector: address, _service_fee: uint256):
     self.blueprint = _blueprint
     self.compass = _compass
@@ -147,8 +147,8 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
     self.service_fee = _service_fee
     CONTROLLER_FACTORY = controller_factory
     ROUTER = router
-    WETH = ControllerFactory(controller_factory).WETH()
-    STABLECOIN = ControllerFactory(CONTROLLER_FACTORY).stablecoin()
+    WETH = staticcall ControllerFactory(controller_factory).WETH()
+    STABLECOIN = staticcall ControllerFactory(CONTROLLER_FACTORY).stablecoin()
     log UpdateCompass(empty(address), _compass)
     log UpdateBlueprint(empty(address), _blueprint)
     log UpdateRefundWallet(empty(address), _refund_wallet)
@@ -158,28 +158,28 @@ def __init__(_blueprint: address, _compass: address, controller_factory: address
 
 @internal
 def _safe_approve(_token: address, _spender: address, _amount: uint256):
-    assert ERC20(_token).approve(_spender, _amount, default_return_value=True), "Failed approve"
+    assert extcall ERC20(_token).approve(_spender, _amount, default_return_value=True), "Failed approve"
 
 @internal
 def _safe_transfer(_token: address, _to: address, _amount: uint256):
-    assert ERC20(_token).transfer(_to, _amount, default_return_value=True), "Failed transfer"
+    assert extcall ERC20(_token).transfer(_to, _amount, default_return_value=True), "Failed transfer"
 
 @internal
 def _safe_transfer_from(_token: address, _from: address, _to: address, _amount: uint256):
-    assert ERC20(_token).transferFrom(_from, _to, _amount, default_return_value=True), "Failed transferFrom"
+    assert extcall ERC20(_token).transferFrom(_from, _to, _amount, default_return_value=True), "Failed transferFrom"
 
 @external
 @payable
-@nonreentrant('lock')
+@nonreentrant
 def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], leverage: uint256, deleverage_percentage: uint256, health_threshold: uint256, expire: uint256, number_trades: uint256, interval: uint256):
     _gas_fee: uint256 = self.gas_fee * number_trades
     _service_fee: uint256 = self.service_fee
-    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
+    controller: address = staticcall ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
     collateral_amount: uint256 = 0
     _value: uint256 = msg.value
-    for swap_info in swap_infos:
+    for swap_info: SwapInfo in swap_infos:
         last_index: uint256 = 0
-        for i in range(6): # to the first
+        for i: uint256 in range(6): # to the first
             last_index = unsafe_sub(10, unsafe_add(i, i))
             if swap_info.route[last_index] != empty(address):
                 break
@@ -193,20 +193,20 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
             else:
                 self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
                 if swap_info.route[0] == WETH:
-                    WrappedEth(WETH).withdraw(amount)
+                    extcall WrappedEth(WETH).withdraw(amount)
                 else:
                     self._safe_approve(swap_info.route[0], ROUTER, amount)
-                    amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+                    amount = extcall CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         else:
             if swap_info.route[0] == VETH:
                 assert _value >= amount, "Insuf deposit"
                 _value = unsafe_sub(_value, amount)
-                amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
+                amount = extcall CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self, value=amount)
             else:
                 self._safe_transfer_from(swap_info.route[0], msg.sender, self, amount)
                 if swap_info.route[0] != collateral:
                     self._safe_approve(swap_info.route[0], ROUTER, amount)
-                    amount = CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
+                    amount = extcall CurveSwapRouter(ROUTER).exchange(swap_info.route, swap_info.swap_params, amount, swap_info.expected, swap_info.pools, self)
         collateral_amount += amount
     if _value > _gas_fee:
         send(msg.sender, unsafe_sub(_value, _gas_fee))
@@ -227,19 +227,19 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
     self.last_deposit_id = unsafe_add(_deposit_id, 1)
     if number_trades > 1:
         _amount: uint256 = unsafe_div(collateral_amount, number_trades)
-        self.bot_info[_deposit_id] = BotInfo({
-            depositor: msg.sender,
-            collateral: collateral,
-            amount: _amount,
-            debt: debt,
-            N: N,
-            leverage: leverage,
-            deleverage_percentage: deleverage_percentage,
-            health_threshold: health_threshold,
-            expire: expire,
-            remaining_count: unsafe_sub(number_trades, 1),
-            interval: interval
-        })
+        self.bot_info[_deposit_id] = BotInfo(
+            depositor = msg.sender,
+            collateral = collateral,
+            amount = _amount,
+            debt = debt,
+            N = N,
+            leverage = leverage,
+            deleverage_percentage = deleverage_percentage,
+            health_threshold = health_threshold,
+            expire = expire,
+            remaining_count = unsafe_sub(number_trades, 1),
+            interval = interval
+        )
         self.remaining_funds[msg.sender][collateral] +=  unsafe_sub(collateral_amount, _amount)
     else:
         assert number_trades == 1, "Wrong number trades"
@@ -248,7 +248,7 @@ def create_bot(swap_infos: DynArray[SwapInfo, MAX_SIZE], collateral: address, de
 @internal
 def _create_bot(deposit_id: uint256, depositor: address, collateral: address, amount: uint256, debt: uint256, N: uint256, callbacker: address, callback_args: DynArray[uint256,5], leverage: uint256, deleverage_percentage: uint256, health_threshold: uint256, expire: uint256, remaining_count: uint256, interval: uint256):
     _service_fee: uint256 = self.service_fee
-    controller: address = ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
+    controller: address = staticcall ControllerFactory(CONTROLLER_FACTORY).get_controller(collateral)
     bot: address = empty(address)
     if amount > 0:
         if collateral == WETH:
@@ -256,7 +256,7 @@ def _create_bot(deposit_id: uint256, depositor: address, collateral: address, am
         else:
             bot = create_from_blueprint(self.blueprint, controller, WETH, depositor, collateral, STABLECOIN, code_offset=3)
             self._safe_transfer(collateral, bot, amount)
-        Bot(bot).create_loan_extended(amount, debt, N, callbacker, callback_args)
+        extcall Bot(bot).create_loan_extended(amount, debt, N, callbacker, callback_args)
         self.bot_to_owner[bot] = depositor
         log BotStarted(deposit_id, depositor, bot, collateral, amount, debt, N, leverage, deleverage_percentage, health_threshold, expire, callbacker, callback_args, remaining_count, interval)
 
@@ -270,31 +270,31 @@ def create_next_bot(deposit_id: uint256, callbacker: address, callback_args: Dyn
     self.bot_info[deposit_id].remaining_count = unsafe_sub(remaining_count, 1)
 
 @external
-@nonreentrant('lock')
+@nonreentrant
 def repay_bot(bots: DynArray[address, MAX_SIZE], callbackers: DynArray[address, MAX_SIZE], callback_args: DynArray[DynArray[uint256,5], MAX_SIZE]):
     assert len(bots) == len(callbackers) and len(bots) == len(callback_args), "invalidate"
     if msg.sender == self.compass:
         assert convert(slice(msg.data, unsafe_sub(len(msg.data), 32), 32), bytes32) == self.paloma, "Unauthorized"
-        for i in range(MAX_SIZE):
+        for i: uint256 in range(MAX_SIZE):
             if i >= len(bots):
                 break
             bal0: uint256 = 0
             bal1: uint256 = 0
-            bal0, bal1 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
+            bal0, bal1 = extcall Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
             log BotRepayed(self.bot_to_owner[bots[i]], bots[i], bal0, bal1)
     else:
-        for i in range(MAX_SIZE):
+        for i: uint256 in range(MAX_SIZE):
             if i >= len(bots):
                 break
             owner: address = self.bot_to_owner[bots[i]]
             assert owner == msg.sender, "Unauthorized"
             bal0: uint256 = 0
             bal1: uint256 = 0
-            bal0, bal1 = Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
+            bal0, bal1 = extcall Bot(bots[i]).repay_extended(callbackers[i], callback_args[i])
             log BotRepayed(owner, bots[i], bal0, bal1)
 
 @external
-@nonreentrant('lock')
+@nonreentrant
 def cancel_pending_bot(collateral: address, collateral_amount: uint256):
     _amount: uint256 = self.remaining_funds[msg.sender][collateral]
     assert _amount >= collateral_amount, "Unavailable"
@@ -306,7 +306,7 @@ def cancel_pending_bot(collateral: address, collateral_amount: uint256):
     log CancelPendingBot(msg.sender, collateral, collateral_amount)
 
 @external
-@nonreentrant('lock')
+@nonreentrant
 def liquidate_bot(bot: address, min_x: uint256, callbacker: address, callback_args: DynArray[uint256, 5]):
     owner: address = self.bot_to_owner[bot]
     if msg.sender == self.compass:
@@ -315,18 +315,18 @@ def liquidate_bot(bot: address, min_x: uint256, callbacker: address, callback_ar
         assert owner == msg.sender, "Unauthorized"
     bal0: uint256 = 0
     bal1: uint256 = 0
-    bal0, bal1 = Bot(bot).liquidate_extended(min_x, callbacker, callback_args)
+    bal0, bal1 = extcall Bot(bot).liquidate_extended(min_x, callbacker, callback_args)
     log BotLiquidated(owner, bot, bal0, bal1)
 
 @external
 @view
 def state(bot: address) -> uint256[4]:
-    return Bot(bot).state()
+    return staticcall Bot(bot).state()
 
 @external
 @view
 def health(bot: address) -> int256:
-    return Bot(bot).health()
+    return staticcall Bot(bot).health()
 
 @external
 def update_compass(new_compass: address):
